@@ -39,6 +39,11 @@ interface Comment {
   createdAt: string
 }
 
+interface DetailViewProps {
+  taskId: string
+  onBack?: () => void
+}
+
 // 图片预览 Modal 组件
 function ImageModal({
   images,
@@ -310,17 +315,11 @@ function CommentSection({
   )
 }
 
-export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const [newUrl, setNewUrl] = useState('')
+export function DetailView({ taskId, onBack }: DetailViewProps) {
+  const [task, setTask] = useState<Task | null>(null)
   const [loading, setLoading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  // Tab 状态
-  const [taskFilter, setTaskFilter] = useState<'all' | 'processing' | 'completed'>('all')
-  const [searchQuery, setSearchQuery] = useState('')
 
   // AI 创作参数状态
   const [aspectRatio, setAspectRatio] = useState('9:16')
@@ -349,12 +348,10 @@ export default function Home() {
     e.stopPropagation()
     setIsDraggingOver(false)
 
-    // 检查是否有文件拖入
     const files = Array.from(e.dataTransfer.files)
     const imageFiles = files.filter(f => f.type.startsWith('image/'))
 
     if (imageFiles.length > 0) {
-      // 处理本地文件
       imageFiles.forEach(file => {
         if (uploadedImages.length >= 5) return
         const reader = new FileReader()
@@ -370,10 +367,8 @@ export default function Home() {
       return
     }
 
-    // 处理从其他图片拖拽（获取图片URL）
     const imageUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
     if (imageUrl && (imageUrl.startsWith('http') || imageUrl.startsWith('data:image'))) {
-      // 检查是否已存在
       if (!uploadedImages.includes(imageUrl) && uploadedImages.length < 5) {
         setUploadedImages(prev => [...prev, imageUrl])
       }
@@ -398,7 +393,6 @@ export default function Home() {
         reader.readAsDataURL(file)
       })
     }
-    // 清空 input 以便重复选择同一文件
     if (uploadInputRef.current) {
       uploadInputRef.current.value = ''
     }
@@ -482,138 +476,27 @@ export default function Home() {
   const [videoPreview, setVideoPreview] = useState<{ url: string; cover: string } | null>(null)
 
   useEffect(() => {
-    fetchTasks()
-  }, [])
+    fetchTask()
+  }, [taskId])
 
-  const fetchTasks = async () => {
+  const fetchTask = async () => {
     try {
-      const res = await fetch('/api/tasks')
+      const res = await fetch(`/api/tasks/${taskId}`)
       const data = await res.json()
-      setTasks(data)
-      if (data.length > 0 && !selectedTask) {
-        setSelectedTask(data[0])
-      }
+      setTask(data)
     } catch (error) {
-      console.error('Failed to fetch tasks:', error)
+      console.error('Failed to fetch task:', error)
     }
-  }
-
-  // 过滤任务
-  const filteredTasks = tasks.filter(task => {
-    if (searchQuery && !task.title?.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        !task.url.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false
-    }
-    if (taskFilter === 'processing' && !['pending', 'parsing', 'generating'].includes(task.status)) {
-      return false
-    }
-    if (taskFilter === 'completed' && task.status !== 'completed') {
-      return false
-    }
-    return true
-  })
-
-  // 创建社交链接任务
-  const createTask = async () => {
-    if (!newUrl.trim()) return
-    setLoading(true)
-    try {
-      // 检查是否包含链接
-      const urlPattern = /https?:\/\/[^\s]+/i
-      const match = newUrl.match(urlPattern)
-
-      if (match) {
-        // 带链接 - 正常解析
-        const res = await fetch('/api/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: newUrl, type: 'url' })
-        })
-        const task = await res.json()
-        setTasks([task, ...tasks])
-        setSelectedTask(task)
-      } else {
-        // 纯文字 - 当作标题，使用随机占位图
-        const placeholderImages = [
-          'https://via.placeholder.com/400x300/4F46E5/FFFFFF?text=Image+1',
-          'https://via.placeholder.com/400x300/10B981/FFFFFF?text=Image+2',
-          'https://via.placeholder.com/400x300/F59E0B/FFFFFF?text=Image+3',
-          'https://via.placeholder.com/400x300/EF4444/FFFFFF?text=Image+4',
-          'https://via.placeholder.com/400x300/8B5CF6/FFFFFF?text=Image+5',
-          'https://via.placeholder.com/400x300/EC4899/FFFFFF?text=Image+6',
-          'https://via.placeholder.com/400x300/06B6D4/FFFFFF?text=Image+7',
-          'https://via.placeholder.com/400x300/84CC16/FFFFFF?text=Image+8'
-        ]
-        const randomImage = placeholderImages[Math.floor(Math.random() * placeholderImages.length)]
-
-        const res = await fetch('/api/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: newUrl,
-            type: 'title',
-            title: newUrl,
-            coverUrl: randomImage,
-            status: 'pending'
-          })
-        })
-        const task = await res.json()
-        setTasks([task, ...tasks])
-        setSelectedTask(task)
-      }
-      setNewUrl('')
-    } catch (error) {
-      console.error('Failed to create task:', error)
-    }
-    setLoading(false)
-  }
-
-  // 上传本地图片
-  const uploadFile = async (file: File) => {
-    setLoading(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!res.ok) {
-        throw new Error('Upload failed')
-      }
-
-      const data = await res.json()
-
-      const taskRes = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: data.url,
-          type: 'upload',
-          coverUrl: data.url,
-          status: 'pending'
-        })
-      })
-
-      const task = await taskRes.json()
-      setTasks([task, ...tasks])
-      setSelectedTask(task)
-    } catch (error) {
-      console.error('Failed to upload file:', error)
-    }
-    setLoading(false)
   }
 
   // 解析任务
-  const parseTask = async (taskId: string) => {
+  const parseTask = async () => {
+    if (!task) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/tasks/${taskId}/parse`, { method: 'POST' })
+      const res = await fetch(`/api/tasks/${task.id}/parse`, { method: 'POST' })
       const updatedTask = await res.json()
-      setTasks(tasks.map(t => t.id === taskId ? updatedTask : t))
-      setSelectedTask(updatedTask)
+      setTask(updatedTask)
     } catch (error) {
       console.error('Failed to parse task:', error)
     }
@@ -621,13 +504,13 @@ export default function Home() {
   }
 
   // 生成图片
-  const generateImage = async (taskId: string) => {
+  const generateImage = async () => {
+    if (!task) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/tasks/${taskId}/generate`, { method: 'POST' })
+      const res = await fetch(`/api/tasks/${task.id}/generate`, { method: 'POST' })
       const updatedTask = await res.json()
-      setTasks(tasks.map(t => t.id === taskId ? updatedTask : t))
-      setSelectedTask(updatedTask)
+      setTask(updatedTask)
     } catch (error) {
       console.error('Failed to generate image:', error)
     }
@@ -635,14 +518,11 @@ export default function Home() {
   }
 
   // 删除任务
-  const deleteTask = async (taskId: string) => {
+  const deleteTask = async () => {
+    if (!task) return
     try {
-      await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
-      const newTasks = tasks.filter(t => t.id !== taskId)
-      setTasks(newTasks)
-      if (selectedTask?.id === taskId) {
-        setSelectedTask(newTasks[0] || null)
-      }
+      await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' })
+      onBack?.()
     } catch (error) {
       console.error('Failed to delete task:', error)
     }
@@ -650,14 +530,14 @@ export default function Home() {
 
   // 添加评论
   const addComment = async (content: string) => {
-    if (!selectedTask) return
+    if (!task) return
 
     try {
       const clientInfoRes = await fetch('/api/client-info')
       const clientInfo = await clientInfoRes.json()
       const deviceInfo = `${clientInfo.os} ${clientInfo.browser} / ${window.screen.width}x${window.screen.height}`
 
-      const res = await fetch(`/api/tasks/${selectedTask.id}/comments`, {
+      const res = await fetch(`/api/tasks/${task.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -671,12 +551,11 @@ export default function Home() {
       const newComment = await res.json()
 
       const updatedTask = {
-        ...selectedTask,
-        comments: [newComment, ...selectedTask.comments]
+        ...task,
+        comments: [newComment, ...(task.comments || [])]
       }
 
-      setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t))
-      setSelectedTask(updatedTask)
+      setTask(updatedTask)
     } catch (error) {
       console.error('Failed to add comment:', error)
     }
@@ -685,7 +564,7 @@ export default function Home() {
   // 从输入框生成提示词
   const handleGeneratePromptFromInput = async () => {
     const input = document.querySelector('input[placeholder="输入提示词生成图片..."]') as HTMLInputElement
-    if (!input?.value.trim() || !selectedTask) return
+    if (!input?.value.trim() || !task) return
     console.log('生成提示词:', input.value)
     input.value = ''
   }
@@ -705,7 +584,7 @@ export default function Home() {
 
   // 从图片生成提示词并保存为评论
   const generatePromptFromImage = async (imageUrl: string) => {
-    if (!selectedTask) return
+    if (!task) return
 
     try {
       const mockPrompts = [
@@ -723,7 +602,7 @@ export default function Home() {
 
       const commentContent = `🖼️ [图片提示词]\n\n${randomPrompt}`
 
-      const res = await fetch(`/api/tasks/${selectedTask.id}/comments`, {
+      const res = await fetch(`/api/tasks/${task.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -738,12 +617,11 @@ export default function Home() {
       const newComment = await res.json()
 
       const updatedTask = {
-        ...selectedTask,
-        comments: [newComment, ...(selectedTask.comments || [])]
+        ...task,
+        comments: [newComment, ...(task.comments || [])]
       }
 
-      setTasks(tasks.map(t => t.id === selectedTask.id ? updatedTask : t))
-      setSelectedTask(updatedTask)
+      setTask(updatedTask)
       closePreview()
     } catch (error) {
       console.error('Failed to generate prompt:', error)
@@ -781,6 +659,28 @@ export default function Home() {
     }
   }
 
+  // 上传本地图片
+  const uploadFile = async (file: File) => {
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!res.ok) {
+        throw new Error('Upload failed')
+      }
+
+      const data = await res.json()
+      // 不创建新任务，直接添加到上传图片列表
+    } catch (error) {
+      console.error('Failed to upload file:', error)
+    }
+  }
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files) {
@@ -811,9 +711,9 @@ export default function Home() {
     }
   }
 
-  const parsedImages = selectedTask?.images ? JSON.parse(selectedTask.images) : []
-  const generatedImages = selectedTask?.generatedImages?.filter(img => img.imageUrl).map(img => img.imageUrl!) || []
-  const isUploadTask = selectedTask?.type === 'upload'
+  const parsedImages = task?.images ? JSON.parse(task.images) : []
+  const generatedImages = task?.generatedImages?.filter(img => img.imageUrl).map(img => img.imageUrl!) || []
+  const isUploadTask = task?.type === 'upload'
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -828,7 +728,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex h-screen">
+    <>
       {/* 图片预览 Modal */}
       {previewImages.length > 0 && (
         <ImageModal
@@ -851,185 +751,65 @@ export default function Home() {
         />
       )}
 
-      {/* 左侧蓝色侧边栏 */}
-      <div
-        className={`w-72 bg-gradient-to-b from-blue-500 to-blue-600 flex flex-col ${isDragging ? 'ring-4 ring-white/30' : ''}`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        {/* 头像区域 */}
-        <div className="p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-            <span className="text-white text-lg">👤</span>
-          </div>
-          <span className="text-white font-medium">User</span>
-        </div>
-
-        {/* 搜索框 */}
-        <div className="px-4 pb-3">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索任务..."
-            className="w-full px-3 py-2 bg-white/20 rounded-lg text-white placeholder-white/70 text-sm focus:outline-none"
-          />
-        </div>
-
-        {/* Tab 切换 */}
-        <div className="px-4 pb-3 flex gap-1">
-          {(['all', 'processing', 'completed'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setTaskFilter(tab)}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                taskFilter === tab
-                  ? 'bg-white text-blue-600'
-                  : 'text-white/80 hover:bg-white/10'
-              }`}
-            >
-              {tab === 'all' ? '全部' : tab === 'processing' ? '进行中' : '已完成'}
-            </button>
-          ))}
-        </div>
-
-        {/* 任务列表 */}
-        <div className="flex-1 overflow-y-auto">
-          {filteredTasks.map((task, index) => (
-            <div
-              key={`${task.id}-${index}`}
-              onClick={() => setSelectedTask(task)}
-              className={`px-3 py-2 cursor-pointer transition-colors ${
-                selectedTask?.id === task.id
-                  ? 'bg-white/20'
-                  : 'hover:bg-white/10'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {(task.coverUrl || task.images) && (
-                  <img
-                    src={task.coverUrl || (JSON.parse(task.images || '[]')[0])}
-                    alt="thumbnail"
-                    className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="text-white text-sm truncate">
-                    {task.title || (task.type === 'upload' ? '本地上传' : '链接')}
-                  </div>
-                  <div className="text-white/60 text-xs truncate">
-                    {task.authorName || '未解析'}
-                  </div>
-                </div>
-                <div className="text-white/50 text-xs flex-shrink-0">
-                  {formatDate(task.createdAt).split(' ')[0]}
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {filteredTasks.length === 0 && (
-            <div className="p-4 text-center text-white/60 text-sm">
-              暂无任务
-            </div>
-          )}
-        </div>
-
-        {/* 添加任务 */}
-        <div className="p-3 border-t border-white/20">
-          <div className="flex gap-1">
-            <input
-              type="text"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              placeholder="输入链接添加任务..."
-              className="flex-1 px-2 py-1.5 bg-white/20 rounded-lg text-white placeholder-white/70 text-xs focus:outline-none"
-              onKeyDown={(e) => e.key === 'Enter' && createTask()}
-            />
-            <button
-              onClick={createTask}
-              disabled={loading || !newUrl.trim()}
-              className="px-2 py-1.5 bg-white text-blue-600 rounded-lg text-sm hover:bg-white/90 disabled:opacity-50"
-            >
-              +
-            </button>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-            className="w-full mt-2 px-3 py-1.5 bg-white/20 text-white rounded-lg text-xs hover:bg-white/30 disabled:opacity-50"
-          >
-            📁 上传图片
-          </button>
-        </div>
-      </div>
-
-      {/* 中间主内容区 */}
-      <div className="flex-1 overflow-y-auto p-6 pb-24 bg-gray-50">
-        {selectedTask ? (
+      {/* 主内容区 + 右侧列 */}
+      <div className="flex flex-1 h-full">
+        {/* 中间主内容区 */}
+        <div className="flex-1 overflow-y-auto p-6 pb-24 bg-gray-50">
+          {task ? (
           <div className="max-w-4xl mx-auto">
             {/* 本地图片模式 */}
             {isUploadTask ? (
               <div className="bg-white rounded-lg p-4 shadow-sm">
                 <div className="flex gap-2 mb-4">
-                  {(selectedTask.status === 'pending' || selectedTask.status === 'failed') && selectedTask.coverUrl && (
+                  {(task.status === 'pending' || task.status === 'failed') && task.coverUrl && (
                     <button
-                      onClick={() => generateImage(selectedTask.id)}
+                      onClick={generateImage}
                       disabled={loading}
                       className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50"
                     >
                       生成图片
                     </button>
                   )}
-                  {selectedTask.status === 'generating' && (
+                  {task.status === 'generating' && (
                     <button disabled className="px-4 py-2 bg-yellow-500 text-white rounded">
                       生成中...
                     </button>
                   )}
                   <button
-                    onClick={() => deleteTask(selectedTask.id)}
+                    onClick={deleteTask}
                     className="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200"
                   >
                     删除
                   </button>
                 </div>
 
-                {selectedTask.coverUrl && (
+                {task.coverUrl && (
                   <div className="mb-4">
                     <div className="text-sm font-medium text-gray-500 mb-2">
-                      {selectedTask.videoUrl && selectedTask.videoUrl.length > 0 ? '封面视频' : '封面图'}
+                      {task.videoUrl && task.videoUrl.length > 0 ? '封面视频' : '封面图'}
                     </div>
                     <div
-                      className={`inline-block rounded-lg overflow-hidden cursor-pointer hover:opacity-80 border-2 border-blue-200 relative ${selectedTask.videoUrl && selectedTask.videoUrl.length > 0 ? 'cursor-play' : ''}`}
+                      className={`inline-block rounded-lg overflow-hidden cursor-pointer hover:opacity-80 border-2 border-blue-200 relative ${task.videoUrl && task.videoUrl.length > 0 ? 'cursor-play' : ''}`}
                       onClick={() => {
-                        if (selectedTask.videoUrl && selectedTask.videoUrl.length > 0) {
-                          setVideoPreview({ url: selectedTask.videoUrl, cover: selectedTask.coverUrl! })
+                        if (task.videoUrl && task.videoUrl.length > 0) {
+                          setVideoPreview({ url: task.videoUrl, cover: task.coverUrl! })
                         } else {
-                          openPreview([selectedTask.coverUrl!], '封面图', 0)
+                          openPreview([task.coverUrl!], '封面图', 0)
                         }
                       }}
-                      title={selectedTask.videoUrl && selectedTask.videoUrl.length > 0 ? '点击播放视频 - 拖拽到AI创作模式添加' : '封面图 - 拖拽到AI创作模式添加'}
+                      title={task.videoUrl && task.videoUrl.length > 0 ? '点击播放视频 - 拖拽到AI创作模式添加' : '封面图 - 拖拽到AI创作模式添加'}
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData('text/uri-list', selectedTask.coverUrl!)
-                        e.dataTransfer.setData('text/plain', selectedTask.coverUrl!)
+                        e.dataTransfer.setData('text/uri-list', task.coverUrl!)
+                        e.dataTransfer.setData('text/plain', task.coverUrl!)
                       }}
                     >
                       <img
-                        src={selectedTask.coverUrl}
+                        src={task.coverUrl}
                         alt="cover"
                         className="max-w-full max-h-96 object-contain"
                       />
-                      {selectedTask.videoUrl && selectedTask.videoUrl.length > 0 && (
+                      {task.videoUrl && task.videoUrl.length > 0 && (
                         <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                           <div className="w-16 h-16 bg-white/90 rounded-full flex items-center justify-center">
                             <span className="text-3xl">▶️</span>
@@ -1041,20 +821,20 @@ export default function Home() {
                 )}
 
                 <div className="text-xs text-gray-400 space-y-1">
-                  <div>创建时间: {formatDate(selectedTask.createdAt)}</div>
+                  <div>创建时间: {formatDate(task.createdAt)}</div>
                 </div>
               </div>
             ) : (
               /* 社交链接模式 */
               <div className="bg-white rounded-lg p-4 mb-4 shadow-sm">
-                {selectedTask.title ? (
+                {task.title ? (
                   <a
-                    href={selectedTask.url}
+                    href={task.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-lg font-medium text-blue-600 hover:text-blue-800 hover:underline block mb-3"
                   >
-                    {selectedTask.title}
+                    {task.title}
                   </a>
                 ) : (
                   <h2 className="text-lg font-medium mb-3 text-gray-400">
@@ -1062,11 +842,11 @@ export default function Home() {
                   </h2>
                 )}
 
-                {selectedTask.authorName && (
+                {task.authorName && (
                   <div className="flex items-center gap-3 mb-3">
-                    {selectedTask.authorAvatar ? (
+                    {task.authorAvatar ? (
                       <img
-                        src={selectedTask.authorAvatar}
+                        src={task.authorAvatar}
                         alt="avatar"
                         className="w-8 h-8 rounded-full object-cover"
                       />
@@ -1075,42 +855,42 @@ export default function Home() {
                         <span className="text-gray-400">?</span>
                       </div>
                     )}
-                    <span className="text-sm text-gray-600">{selectedTask.authorName}</span>
+                    <span className="text-sm text-gray-600">{task.authorName}</span>
                   </div>
                 )}
 
                 <div className="flex items-center gap-2 mb-3 text-sm">
-                  {selectedTask.videoUrl && selectedTask.videoUrl.length > 0 ? (
+                  {task.videoUrl && task.videoUrl.length > 0 ? (
                     <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded">📹 视频</span>
                   ) : parsedImages.length > 0 ? (
                     <span className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded">🖼️ 图片 ({parsedImages.length}张)</span>
                   ) : (
                     <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded">📋 待解析</span>
                   )}
-                  <span className={`px-2 py-0.5 rounded ${getStatusColor(selectedTask.status)} text-white`}>
-                    {getStatusText(selectedTask.status)}
+                  <span className={`px-2 py-0.5 rounded ${getStatusColor(task.status)} text-white`}>
+                    {getStatusText(task.status)}
                   </span>
                 </div>
 
                 <div className="text-xs text-gray-400 mb-4 break-all">
-                  {selectedTask.url}
+                  {task.url}
                 </div>
 
-                {selectedTask.coverUrl && (
+                {task.coverUrl && (
                   <div className="mb-4">
                     <div className="text-sm font-medium text-gray-500 mb-2">封面图</div>
                     <div
                       className="inline-block w-32 h-32 rounded-lg overflow-hidden cursor-move hover:opacity-80 border-2 border-blue-200"
-                      onClick={() => openPreview([selectedTask.coverUrl!], '封面图', 0)}
+                      onClick={() => openPreview([task.coverUrl!], '封面图', 0)}
                       title="封面图 - 拖拽到AI创作模式添加"
                       draggable
                       onDragStart={(e) => {
-                        e.dataTransfer.setData('text/uri-list', selectedTask.coverUrl!)
-                        e.dataTransfer.setData('text/plain', selectedTask.coverUrl!)
+                        e.dataTransfer.setData('text/uri-list', task.coverUrl!)
+                        e.dataTransfer.setData('text/plain', task.coverUrl!)
                       }}
                     >
                       <img
-                        src={selectedTask.coverUrl}
+                        src={task.coverUrl}
                         alt="cover"
                         className="w-full h-full object-cover"
                       />
@@ -1146,26 +926,26 @@ export default function Home() {
                 )}
 
                 {/* 原文视频 */}
-                {selectedTask.videoUrl && selectedTask.videoUrl.length > 0 && (
+                {task.videoUrl && task.videoUrl.length > 0 && (
                   <div className="mb-4">
                     <div className="text-sm font-medium text-gray-500 mb-2">原文视频</div>
                     <a
-                      href={selectedTask.videoUrl}
+                      href={task.videoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-block rounded-lg overflow-hidden cursor-pointer hover:opacity-80 border-2 border-red-200 relative"
                       title="点击播放视频 - 拖拽到AI创作模式添加"
                       draggable
                       onDragStart={(e) => {
-                        if (selectedTask.coverUrl) {
-                          e.dataTransfer.setData('text/uri-list', selectedTask.coverUrl)
-                          e.dataTransfer.setData('text/plain', selectedTask.coverUrl)
+                        if (task.coverUrl) {
+                          e.dataTransfer.setData('text/uri-list', task.coverUrl)
+                          e.dataTransfer.setData('text/plain', task.coverUrl)
                         }
                       }}
                     >
-                      {selectedTask.coverUrl && (
+                      {task.coverUrl && (
                         <img
-                          src={selectedTask.coverUrl}
+                          src={task.coverUrl}
                           alt="原文视频"
                           className="w-48 h-32 object-cover"
                         />
@@ -1179,58 +959,58 @@ export default function Home() {
                   </div>
                 )}
 
-                {selectedTask.errorMsg && (
+                {task.errorMsg && (
                   <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
-                    错误: {selectedTask.errorMsg}
+                    错误: {task.errorMsg}
                   </div>
                 )}
 
                 <div className="mb-4 text-xs text-gray-400 space-y-1">
-                  <div>创建时间: {formatDate(selectedTask.createdAt)}</div>
-                  <div>更新时间: {formatDate(selectedTask.updatedAt)}</div>
+                  <div>创建时间: {formatDate(task.createdAt)}</div>
+                  <div>更新时间: {formatDate(task.updatedAt)}</div>
                 </div>
 
                 <div className="flex gap-2 pt-3 border-t">
-                  {selectedTask.status === 'pending' && !selectedTask.title && (
+                  {task.status === 'pending' && !task.title && (
                     <button
-                      onClick={() => parseTask(selectedTask.id)}
+                      onClick={parseTask}
                       disabled={loading}
                       className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
                     >
                       解析内容
                     </button>
                   )}
-                  {selectedTask.title && (
+                  {task.title && (
                     <button
-                      onClick={() => parseTask(selectedTask.id)}
-                      disabled={loading || selectedTask.status === 'parsing'}
+                      onClick={parseTask}
+                      disabled={loading || task.status === 'parsing'}
                       className="px-4 py-2 text-white rounded disabled:opacity-50"
                       style={{ backgroundColor: '#f97316' }}
                     >
                       重新解析
                     </button>
                   )}
-                  {selectedTask.status === 'parsing' && (
+                  {task.status === 'parsing' && (
                     <button disabled className="px-4 py-2 bg-yellow-500 text-white rounded">
                       解析中...
                     </button>
                   )}
-                  {(selectedTask.status === 'pending' || selectedTask.status === 'failed') && selectedTask.title && (
+                  {(task.status === 'pending' || task.status === 'failed') && task.title && (
                     <button
-                      onClick={() => generateImage(selectedTask.id)}
+                      onClick={generateImage}
                       disabled={loading}
                       className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50"
                     >
                       生成图片
                     </button>
                   )}
-                  {selectedTask.status === 'generating' && (
+                  {task.status === 'generating' && (
                     <button disabled className="px-4 py-2 bg-yellow-500 text-white rounded">
                       生成中...
                     </button>
                   )}
                   <button
-                    onClick={() => deleteTask(selectedTask.id)}
+                    onClick={deleteTask}
                     className="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200"
                   >
                     删除
@@ -1240,10 +1020,10 @@ export default function Home() {
             )}
 
             {/* 提示词信息 */}
-            {selectedTask.prompt && (
+            {task.prompt && (
               <div className="bg-white rounded-lg p-4 mb-4 shadow-sm">
                 <h3 className="text-sm font-medium text-gray-500 mb-2">提示词</h3>
-                <p className="text-gray-800">{selectedTask.prompt}</p>
+                <p className="text-gray-800">{task.prompt}</p>
               </div>
             )}
 
@@ -1275,7 +1055,7 @@ export default function Home() {
               </div>
             )}
 
-            {selectedTask.status === 'completed' && generatedImages.length === 0 && (
+            {task.status === 'completed' && generatedImages.length === 0 && (
               <div className="bg-white rounded-lg p-8 text-center text-gray-400">
                 未生成图片
               </div>
@@ -1284,8 +1064,8 @@ export default function Home() {
         ) : (
           <div className="flex items-center justify-center h-full text-gray-400">
             <div className="text-center">
-              <div className="text-6xl mb-4">👈</div>
-              <div>选择一个任务查看详情</div>
+              <div className="text-6xl mb-4">Loading...</div>
+              <div>加载任务详情中...</div>
             </div>
           </div>
         )}
@@ -1448,11 +1228,12 @@ export default function Home() {
         {/* 下半部分：评论 */}
         <div className="flex-1 overflow-hidden">
           <CommentSection
-            comments={selectedTask?.comments || []}
+            comments={task?.comments || []}
             onAddComment={addComment}
           />
         </div>
       </div>
-    </div>
+      </div>
+    </>
   )
 }

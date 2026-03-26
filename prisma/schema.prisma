@@ -1,0 +1,53 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Task {
+  id          String   @id @default(uuid())
+  url         String
+  type        String   @default("url")  // "url" = 社交链接, "upload" = 本地上传
+  title       String?
+  authorName  String?
+  authorAvatar String?
+  coverUrl    String?
+  videoUrl    String?
+  images      String   @default("[]")  // JSON string array
+  prompt      String?
+  status      String   @default("pending")  // pending, parsing, generating, completed, failed
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  generatedImages GeneratedImage[]
+  comments     Comment[]
+}
+
+model GeneratedImage {
+  id        String   @id @default(uuid())
+  taskId    String
+  imageUrl  String?
+  status    String   @default("pending")  // pending, generating, completed, failed
+  errorMsg  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  taskId    String
+  content   String
+  imageUrl  String?  // 图片URL
+  device    String?  // 设备信息
+  ip        String?  // IP地址
+  location  String?  // 位置/地区
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
